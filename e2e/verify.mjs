@@ -264,14 +264,79 @@ async function testCorruption(browser) {
   await openPanel(page);
   await page.locator(".test-row", { hasText: "井架倾角" }).getByRole("button", { name: "预警区" }).click();
   await page.waitForTimeout(1500);
-  await page.getByRole("button", { name: "篡改事件流（刷新后验证）" }).click();
+  await page.getByRole("button", { name: "改写事件记录（刷新后验证）" }).click();
   await page.reload();
   await page.waitForSelector(".banner");
   await waitForBanner(page, "lock");
   check("篡改：哈希链失效后进入安全联锁", (await page.locator(".failsafe-note").count()) === 1);
   const note = await page.locator(".failsafe-note").innerText();
-  check("篡改：提示哈希链校验失败", note.includes("哈希链"), note);
+  check("篡改：提示记录哈希不符", note.includes("哈希"), note);
   await page.screenshot({ path: `${SHOTS}/06-corrupt-failsafe.png` });
+  await page.context().close();
+}
+
+// ---------- 8. 末尾记录缺失（链仍自洽） ----------
+async function testTailTruncation(browser) {
+  let page = await freshPage(browser);
+  await openPanel(page);
+  // 先产生多条事件：预警开始/结束 + 联锁触发/解除
+  await page.locator(".test-row", { hasText: "井架倾角" }).getByRole("button", { name: "预警区" }).click();
+  await page.waitForTimeout(1300);
+  await page.locator(".test-row", { hasText: "井架倾角" }).getByRole("button", { name: "联锁区" }).click();
+  await waitForBanner(page, "lock");
+  await page.waitForTimeout(600);
+  await page.locator(".test-row", { hasText: "井架倾角" }).getByRole("button", { name: "正常" }).click();
+  await page.waitForTimeout(1600);
+  const before = await page.locator(".events-table tbody tr").count();
+
+  // 仅删除最后一条记录（剩余链仍自洽），锚点未动
+  await page.getByRole("button", { name: "删除最后一条记录（刷新后验证）" }).click();
+  await page.reload();
+  await page.waitForSelector(".banner");
+  await waitForBanner(page, "lock");
+  const note = await page.locator(".failsafe-note").innerText();
+  check("末尾缺失：刷新后进入安全联锁", (await page.locator(".failsafe-note").count()) === 1);
+  check("末尾缺失：提示末尾记录缺失/少 N 条", note.includes("末尾记录缺失") && note.includes("少 1 条"), note);
+  check("末尾缺失：提升/回转均锁定", (await page.locator(".oplock.locked").count()) === 2);
+  check("末尾缺失：记录 FAILSAFE 事件", (await page.locator("text=数据损坏·安全联锁").count()) >= 1);
+  // 被隔离的旧流不再展示，只剩本次 FAILSAFE
+  const after = await page.locator(".events-table tbody tr").count();
+  check("末尾缺失：损坏数据被隔离（不与新链混用）", after === 1 && after < before, `before=${before} after=${after}`);
+
+  // 完整性校验必须报失败
+  await page.click("text=完整性校验");
+  await page.waitForSelector(".result.bad", { timeout: 5000 });
+  check("末尾缺失：完整性校验报失败", (await page.locator(".result.bad").count()) === 1);
+  await page.screenshot({ path: `${SHOTS}/08-tail-truncated.png` });
+
+  // 未复位前再次刷新，仍保持安全联锁
+  await page.reload();
+  await page.waitForSelector(".banner");
+  await waitForBanner(page, "lock");
+  check("末尾缺失：未复位前重复刷新仍联锁", (await page.locator(".failsafe-note").count()) === 1);
+
+  // 负责人确认复位后恢复正常：可追加、可确认复位、完整性校验通过、再刷新正常
+  await login(page, "lzb");
+  await page.getByRole("button", { name: "确认风险解除" }).click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "复位联锁" }).click();
+  await waitForBanner(page, "safe");
+  check("末尾缺失：负责人复位后恢复安全", true);
+
+  // 复位后正常追加事件（一轮预警）不受影响
+  await openPanel(page);
+  await page.locator(".test-row", { hasText: "风速" }).getByRole("button", { name: "预警区" }).click();
+  await page.waitForTimeout(1300);
+  await page.locator(".test-row", { hasText: "风速" }).getByRole("button", { name: "正常" }).click();
+  await page.waitForTimeout(1300);
+  await page.click("text=完整性校验");
+  await page.waitForSelector(".result.ok", { timeout: 5000 });
+  check("末尾缺失：复位后新追加事件链校验通过", (await page.locator(".result.ok").count()) === 1);
+
+  // 再刷新：无安全联锁、状态正常
+  await page.reload();
+  await page.waitForSelector(".banner");
+  check("末尾缺失：复位后刷新不再进入安全联锁", (await page.locator(".failsafe-note").count()) === 0);
   await page.context().close();
 }
 
@@ -321,6 +386,7 @@ async function main() {
     ["5 异常数据", testFaults],
     ["6 数据损坏→安全联锁", testCorruption],
     ["7 手机视口", testMobile],
+    ["8 末尾记录缺失", testTailTruncation],
   ];
   for (const [name, fn] of groups) {
     results.push(`【${name}】`);

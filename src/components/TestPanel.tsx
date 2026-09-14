@@ -56,6 +56,10 @@ export function TestPanel() {
   function corruptEvents() {
     EventLog.corruptStorage();
   }
+  /** 仅删除事件流最后一条（链仍自洽），锚点不匹配 → 刷新后安全联锁 */
+  function truncateTail() {
+    EventLog.truncateTailStorage(1);
+  }
   /** 破坏联锁状态存储 */
   function corruptState() {
     corruptStateStorage();
@@ -75,7 +79,10 @@ export function TestPanel() {
           <button onClick={exactThresholds}>临界值：四路=联锁门限</button>
           <button onClick={allNormal}>全部恢复正常</button>
           <button className="danger" onClick={corruptEvents}>
-            篡改事件流（刷新后验证）
+            改写事件记录（刷新后验证）
+          </button>
+          <button className="danger" onClick={truncateTail}>
+            删除最后一条记录（刷新后验证）
           </button>
           <button className="danger" onClick={corruptState}>
             损坏联锁状态（刷新后验证）
@@ -83,7 +90,8 @@ export function TestPanel() {
         </div>
         <div className="test-note">
           当前全场等级：{LEVEL_TEXT[engine.overallLevel()]}；操作锁定：{engine.isLocked() ? "是" : "否"}。
-          「篡改/损坏」按钮破坏 localStorage 后按 F5 刷新，系统应进入红色安全联锁并记录“数据损坏”事件。
+          「改写/删除/损坏」按钮破坏 localStorage 后按 F5 刷新，系统应进入红色安全联锁并记录“数据损坏”事件；
+          仅删除最后一条记录（链仍自洽）时，由链尾锚点识别末尾缺失。
           <br />
           每 1 秒采集一轮；停刷模式在 {">"}4 秒无数据后按联锁处置。时间戳：{new Date(now).toLocaleTimeString()}
         </div>

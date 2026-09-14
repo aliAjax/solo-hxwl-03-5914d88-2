@@ -1,5 +1,5 @@
 import { CHANNELS, CHANNEL_ORDER, classify, isOutOfRange, thresholdReason } from "./channels";
-import { EventLog } from "./events";
+import { clearTamperMark, EventLog, EventLogCorruptError, readTamperMark } from "./events";
 import { clearState, loadState, saveState, StateCorruptError } from "./persistence";
 import { Simulator } from "./simulator";
 import {
@@ -59,9 +59,14 @@ export class SafetyEngine {
     try {
       log = await EventLog.create();
     } catch (e) {
-      // 事件流损坏：清空重建（哈希链无法信任），进入安全联锁
+      // 事件流损坏（含末尾记录缺失）：隔离重建（哈希链无法信任），进入安全联锁
       log = await EventLog.create();
-      corruptReasons.push("事件流哈希链校验失败");
+      corruptReasons.push(e instanceof EventLogCorruptError ? e.reason : "事件流校验失败");
+    }
+    // 上一次启动已检测到篡改但尚未经负责人复位：继续保持安全联锁
+    const mark = readTamperMark();
+    if (mark && !corruptReasons.some((r) => r.includes(mark.reason))) {
+      corruptReasons.push(mark.reason);
     }
 
     const engine = new SafetyEngine(log);
@@ -335,6 +340,8 @@ export class SafetyEngine {
     });
     this.episode = null;
     this.failsafe = false;
+    // 经值班负责人复位后，历史完整性破坏视为已处置，清除持续标记
+    clearTamperMark();
     this.persist();
     this.emit();
     return { ok: true };

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { CHANNELS } from "../channels";
-import { verifyHashes } from "../events";
+import { verifyLogIntegrity } from "../events";
 import { fmtTime, shortHash } from "../format";
 import { EVENT_TYPE_TEXT, type EventType } from "../types";
 import { useRig } from "../useRig";
@@ -26,7 +26,7 @@ export function EventStream() {
   }, [events, filter, now]);
 
   async function runVerify() {
-    setCheck(await verifyHashes(engine.events()));
+    setCheck(await verifyLogIntegrity(engine.events()));
   }
 
   function exportJson() {
